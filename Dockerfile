@@ -1,26 +1,27 @@
 FROM alpine:edge
 # This is the real maintainer
 # MAINTAINER Onni Hakala <onni.hakala@geniem.com>
+# MAINTAINER Mickaël Perrin <dev@mickaelperrin.fr>
 MAINTAINER Eugen Mayer <eugen.mayer@kontextwork.com>
 
 ARG UNISON_VERSION=2.48.4
+ARG FSWATCH_VERSION=1.9.2
 
-# Install in one run so that build tools won't remain in any docker layers
-# Install build tools
-RUN apk add --update build-base curl bash && \
-    # Install ocaml & emacs from testing repositories
+RUN apk add --update build-base curl bash supervisor && \
     apk add --update-cache --repository http://dl-4.alpinelinux.org/alpine/edge/testing/ ocaml emacs && \
-    # Download & Install Unison
     curl -L https://github.com/bcpierce00/unison/archive/$UNISON_VERSION.tar.gz | tar zxv -C /tmp && \
     cd /tmp/unison-${UNISON_VERSION} && \
     sed -i -e 's/GLIBC_SUPPORT_INOTIFY 0/GLIBC_SUPPORT_INOTIFY 1/' src/fsmonitor/linux/inotify_stubs.c && \
     make && \
     cp src/unison src/unison-fsmonitor /usr/local/bin && \
-    # Remove build tools
-    apk del build-base curl emacs ocaml && \
-    # Remove tmp files and caches
+    curl -L https://github.com/emcrisostomo/fswatch/releases/download/${FSWATCH_VERSION}/fswatch-${FSWATCH_VERSION}.tar.gz | tar zxv -C /tmp && \
+    cd /tmp/fswatch-${FSWATCH_VERSION} && \
+    ./configure && make && make install && make clean && make distclean && \
+    apk del curl emacs build-base ocaml && \
+    apk --update add libgcc libstdc++ && \
     rm -rf /var/cache/apk/* && \
-    rm -rf /tmp/unison-${UNISON_VERSION}
+    rm -rf /tmp/unison-${UNISON_VERSION} && \
+    rm -rf /tmp/fswatch-${FSWATCH_VERSION}
 
 # These can be overridden later
 ENV TZ="Europe/Helsinki" \
@@ -28,8 +29,19 @@ ENV TZ="Europe/Helsinki" \
     UNISON_DIR="/data" \
     HOME="/root"
 
-# Install unison server script
+COPY unison.sh /unison.sh
+COPY fswatch.sh /fswatch.sh
 COPY entrypoint.sh /entrypoint.sh
+COPY supervisord.conf /etc/supervisord.conf
+COPY supervisor.fswatch.conf /etc/supervisor/conf.d/supervisor.fswatch.conf
+COPY supervisor.unison.conf /etc/supervisor/conf.d/supervisor.unison.conf
+
+RUN mkdir -p /docker-entrypoint.d \
+ && chmod +x /entrypoint.sh \
+ && chmod +x /unison.sh \
+ && chmod +x /fswatch.sh \
+ && mkdir -p /etc/supervisor/conf.d
 
 EXPOSE 5000
 ENTRYPOINT ["/entrypoint.sh"]
+CMD ["supervisord"]
